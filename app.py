@@ -4,12 +4,19 @@ from itertools import count
 from flask_pydantic_spec import FlaskPydanticSpec, Response, Request
 from pydantic import BaseModel, Field
 from tinydb import TinyDB, Query
+from tinydb.storages import MemoryStorage
+
 server = Flask(__name__)
 
 spec = FlaskPydanticSpec('Flask', title='Rest Api com flask')
 spec.register(server)
-database = TinyDB('database.json')
+database = TinyDB(storage=MemoryStorage)
 c = count()
+
+class QueryPessoa(BaseModel):
+    id: Optional[int] 
+    idade: Optional[int] 
+    nome: Optional[str] 
 
 class Pessoa(BaseModel):
     id: Optional[int] = Field(default_factory=lambda: next(c))
@@ -20,16 +27,30 @@ class Pessoas(BaseModel):
     pessoas: list[Pessoa]
     cont: int
 
-@server.get('/pessoas')
-@spec.validate(resp=Response(HTTP_200=Pessoas))
+@server.get('/pessoas/')
+@spec.validate(query=QueryPessoa,resp=Response(HTTP_200=Pessoas))
 def pegar_pessoas():
-    """Busca todas as pessoas no banco de dados"""
+    query = request.context.query.dict(exclude_none=True)
+    pessoas_query = database.search(Query().fragment(query))
+    """Busca pessoas no banco de dados"""
     return jsonify(
         Pessoas(
-        pessoas=database.all(),
-        cont=len(database.all())
+            pessoas=pessoas_query,
+            cont=len(pessoas_query)
         ).dict()
-    )
+    )        
+
+@server.get('/pessoas/<int:id>/')
+@spec.validate(resp=Response(HTTP_200=Pessoa))
+def pegar_pessoa(id):
+    """Busca uma pessoa no banco de dados"""
+    try:
+        pessoa = database.search(Query().id == id)[0]
+    except IndexError:
+        return {'message': 'Pessoa não encontrada!'}    
+
+    return jsonify(pessoa)
+    
 
 @server.post('/pessoas')
 @spec.validate(body=Request(Pessoa), resp=Response(HTTP_200=Pessoa))
